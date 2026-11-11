@@ -1,3 +1,7 @@
+// Upgrade NOTE: unity_Scale shader variable was removed; replaced '_WorldSpaceCameraPos.w' with '1.0'
+
+// Upgrade NOTE: unity_Scale shader variable was removed; replaced '_WorldSpaceCameraPos.w' with '1.0'
+
 #include "UnityCG.cginc"
 
 struct v2f
@@ -53,17 +57,27 @@ fixed4 MyFragmentProgram(v2f i) : SV_Target
     // 
     // Hint: argument "i" is a vertex data of type "v2f" defined above. Use this data to calculate appropriate
     // directional vectors (camera view, normal, light)
-
     float4 color = float4(0, 0, 0, 1);
     color.rgb += _EmissionColor.rgb;
 
     float3 L = float3(0, 0, 0); // Light direction
-    float attenuation = 1.0f;
     if (_WorldSpaceLightPos0.w != 0.0) // this is point light
-    {
+    {   
         L = normalize(_WorldSpaceLightPos0.xyz - i.worldPos);
     }
+
+    //attenuation calc
+    float r = distance(_WorldSpaceLightPos0, i.worldPos); 
+    float attenuation = (1.0 / (1.0 + pow(r, 2))); //yeet shadow att
+
+    float3 V = float3(0,0,0); // Camera direction
+    if (1.0 != 0.0)
+    {
+       V = normalize(_WorldSpaceCameraPos.xyz - i.worldPos); 
+    }
     float3 N = normalize(i.worldNormal);
+
+    float3 H = float3((L.x + V.x)/2, (L.y + V.y)/2, (L.z + V.z)/2);
 
     // Diffuse component
     float3 diffuse = float3(0, 0, 0);
@@ -71,8 +85,11 @@ fixed4 MyFragmentProgram(v2f i) : SV_Target
     diffuse = diffuseShade * _DiffuseColor * _LightColor0 * attenuation;
 
     float3 specular = float3(0, 0, 0);
-    float3 ambient = float3(0, 0, 0);
+    float specularShade = max(dot(N, H), 0.0);
+    specular = specularShade * _SpecularColor * _LightColor0  * attenuation;
 
+    float3 ambient = float3(0, 0, 0);
+    ambient = UNITY_LIGHTMODEL_AMBIENT * _DiffuseColor;
 
     color.rgb += ambient + diffuse + specular;
 

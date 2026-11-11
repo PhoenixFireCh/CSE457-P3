@@ -126,6 +126,7 @@ public class RayTracer : MonoBehaviour
 
         // It's a good idea to have the recursive base case at the top of the function 
         // (if (recurseDepth >= max) then return Color.black)
+        if (recursionDepth >= MaxRecursionDepth) return Color.black;
 
         Intersection hit;
         bool isHit = _bvh.IntersectBoundingBox(ray, out hit);  // IntersectBoundingBox checks for a potential intersection for a ray
@@ -155,24 +156,52 @@ public class RayTracer : MonoBehaviour
         var indexOfRefraction = mat.IndexOfRefraction;
     
         var N = hit.normal;
+        var V = ray.direction;
         
         Color result = Color.black;
 
         // (1) It's a good idea to check if the ray is entering or exiting an object...
-
-
-
+        bool isExiting = 0 <= Vector3.Dot(V, N);
+        if (isExiting) N = -N;
         // (2) Iterate over all point lights in the scene to get total contributions. For each light:
         //    + Calculate point light distance attenuation
         //    + Calculate shadow attenuation
         //    + Calculate the direct contributions (diffuse, specular)
+        foreach(PointLightObject l in _pointLightObjects)
+        {
+            var L = (l.LightPos - hit.point).normalized; //Getting vector of light aka the de-facto view
+            var H = new Vector3((L.x + V.x)/2, (L.y + V.y)/2, (L.z + V.z)/2); //Hopefully yhis works
+            //Light distance att calc
+            float lAtt = 1 / (1 + Mathf.Pow(Vector3.Distance(l.LightPos, hit.point), 2));
+            // Shad att calc
+            Ray lightRay = new Ray(hit.point, L);
+            bool lightBlocked = _bvh.IntersectBoundingBox(lightRay, out _);
+            float sAtt = lightBlocked ? 0 : 1;
+            //Direct cont
+            float attenuation = lAtt * sAtt;
+            Color lightColor = l.Color * l.Intensity;
+            Color diffuse = kd * Mathf.Max(0f, Vector3.Dot(N, L));
+            Color specular = ks * Mathf.Max(0f, Vector3.Dot(N, H));
+            result += attenuation * lightColor * (diffuse + specular);
+        }
+        result += ke + kd * _ambientColor;
 
 
         // (3) Calculate contributions from reflection and refraction rays (indirect illumination)
         // Make sure to test if the Reflections and Refractions components are non-zero
         
-        //if (Vector3.Magnitude(new Vector3(ks.r, ks.g, ks.b)) > 0f) { }
-        //if (Vector3.Magnitude(new Vector3(kt.r, kt.g, kt.b)) > 0f && is_T_valid) { }
+        if (Vector3.Magnitude(new Vector3(ks.r, ks.g, ks.b)) > 0f)
+        {
+            Ray r = new Ray(hit.point, V - 2.0f * Vector3.Dot(V, N) * N);
+            result += ks * TraceRay(r, recursionDepth++, debug, ReflectionRayColor);
+        }
+        if (Vector3.Magnitude(new Vector3(kt.r, kt.g, kt.b)) > 0f)
+        {
+            var ci = Vector3.Dot(N, V);
+            float ct = 1.0f - Mathf.Pow(indexOfRefraction, 2) * (1.0f - Mathf.Pow(ci, 2));
+            Ray r = new Ray(hit.point, indexOfRefraction * V + (indexOfRefraction * ci - Mathf.Sqrt(ct)) * N);
+            result += kt * TraceRay(r, recursionDepth++, debug, RefractionRayColor);
+        }
 
         return result;
     }
