@@ -122,8 +122,6 @@ public class RayTracer : MonoBehaviour
     /// <returns>the final color at a pixel</returns>
     private Color TraceRay(Ray ray, int recursionDepth, bool debug, Color rayColor)
     {
-        //TODO: Implement Raytracing
-
         // It's a good idea to have the recursive base case at the top of the function 
         // (if (recurseDepth >= max) then return Color.black)
         if (recursionDepth >= MaxRecursionDepth) return Color.black;
@@ -162,26 +160,29 @@ public class RayTracer : MonoBehaviour
 
         // (1) It's a good idea to check if the ray is entering or exiting an object...
         bool isExiting = 0 <= Vector3.Dot(V, N);
-        if (isExiting) N = -N;
+        if (isExiting) 
+        {
+            N = -N;
+            indexOfRefraction = 1f/indexOfRefraction;
+        }
         // (2) Iterate over all point lights in the scene to get total contributions. For each light:
         //    + Calculate point light distance attenuation
         //    + Calculate shadow attenuation
         //    + Calculate the direct contributions (diffuse, specular)
         foreach(PointLightObject l in _pointLightObjects)
         {
-            var L = (l.LightPos - hit.point).normalized; //Getting vector of light aka the de-facto view
-            var H = new Vector3((L.x + V.x)/2, (L.y + V.y)/2, (L.z + V.z)/2); //Hopefully yhis works
+            var L = Vector3.Normalize(l.LightPos - hit.point); //Getting vector of light aka the de-facto view
+            var H = Vector3.Normalize(new Vector3((L.x + V.x)/2, (L.y + V.y)/2, (L.z + V.z)/2)); //Hopefully yhis works
             //Light distance att calc
-            float lAtt = 1 / (1 + Mathf.Pow(Vector3.Distance(l.LightPos, hit.point), 2));
+            float lAtt = 1f / (1f + Mathf.Pow(Vector3.Distance(hit.point, l.LightPos), 2));
             // Shad att calc
             Ray lightRay = new Ray(hit.point, L);
-            bool lightBlocked = _bvh.IntersectBoundingBox(lightRay, out _);
-            float sAtt = lightBlocked ? 0 : 1;
+            Color sAtt = TraceShadow(lightRay, l, debug, ShadowRayColor);
             //Direct cont
-            float attenuation = lAtt * sAtt;
+            Color attenuation = lAtt * sAtt;
             Color lightColor = l.Color * l.Intensity;
             Color diffuse = kd * Mathf.Max(0f, Vector3.Dot(N, L));
-            Color specular = ks * Mathf.Max(0f, Vector3.Dot(N, H));
+            Color specular = ks * Mathf.Pow(Mathf.Max(0f, Vector3.Dot(N, H)), shininess);
             result += attenuation * lightColor * (diffuse + specular);
         }
         result += ke + kd * _ambientColor;
@@ -189,21 +190,55 @@ public class RayTracer : MonoBehaviour
 
         // (3) Calculate contributions from reflection and refraction rays (indirect illumination)
         // Make sure to test if the Reflections and Refractions components are non-zero
-        
+        //Refraction calculations
+        float n = 1f / indexOfRefraction;
+        var cosI = -Vector3.Dot(N, V);
+        float cosT = Mathf.Sqrt(1f - Mathf.Pow(n, 2) * (1f - Mathf.Pow(cosI, 2)));
+
+
         if (Vector3.Magnitude(new Vector3(ks.r, ks.g, ks.b)) > 0f)
         {
-            Ray r = new Ray(hit.point, V - 2.0f * Vector3.Dot(V, N) * N);
-            result += ks * TraceRay(r, recursionDepth++, debug, ReflectionRayColor);
+            Ray r = new Ray(hit.point, V - 2f * Vector3.Dot(V, N) * N);
+            result += ks * TraceRay(r, recursionDepth + 1, debug, ReflectionRayColor);
         }
-        if (Vector3.Magnitude(new Vector3(kt.r, kt.g, kt.b)) > 0f)
+        if (Vector3.Magnitude(new Vector3(kt.r, kt.g, kt.b)) > 0f && !float.IsNaN(cosT))
         {
-            var ci = Vector3.Dot(N, V);
-            float ct = 1.0f - Mathf.Pow(indexOfRefraction, 2) * (1.0f - Mathf.Pow(ci, 2));
-            Ray r = new Ray(hit.point, indexOfRefraction * V + (indexOfRefraction * ci - Mathf.Sqrt(ct)) * N);
-            result += kt * TraceRay(r, recursionDepth++, debug, RefractionRayColor);
+            Ray r = new Ray(hit.point, n * V + (n * cosI - cosT) * N);
+            result += kt * TraceRay(r, recursionDepth + 1, debug, RefractionRayColor);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Traces a ray to the lightsource to detect shadows, multiplying by the transparency of each intercected object.
+    private Color TraceShadow(Ray ray, PointLightObject l , bool debug, Color rayColor)
+    {
+
+        Intersection hit;
+        bool isHit = _bvh.IntersectBoundingBox(ray, out hit);
+        if (debug)
+        {
+            var hitPoint = ray.GetPoint(1000);
+            if (isHit)
+            {
+                hitPoint = hit.point;
+                Debug.DrawLine(hit.point, hit.point + (float)0.2 * hit.normal, Color.green);
+            }
+            Debug.DrawLine(ray.origin, hitPoint, rayColor);
+        }
+        float dist = Vector3.Distance(ray.origin, hit.point);
+        if (!isHit || dist > Vector3.Distance(ray.origin, l.LightPos)) return Color.white;
+        
+        var mat = hit.material;
+        var kt = mat.Kt;
+        if (Vector3.Magnitude(new Vector3(kt.r, kt.g, kt.b)) > 0f)
+        {
+            return kt * TraceShadow(new Ray(hit.point, ray.direction), l, debug, rayColor);
+        } else
+        {
+            return Color.black;
+        }
     }
     
     /// <summary>
