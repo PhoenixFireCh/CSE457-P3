@@ -172,7 +172,7 @@ public class RayTracer : MonoBehaviour
         foreach(PointLightObject l in _pointLightObjects)
         {
             var L = Vector3.Normalize(l.LightPos - hit.point); //Getting vector of light aka the de-facto view
-            var H = Vector3.Normalize(new Vector3((L.x + V.x)/2, (L.y + V.y)/2, (L.z + V.z)/2)); //Hopefully yhis works
+            var H = Vector3.Normalize(-V+L); //Hopefully yhis works
             //Light distance att calc
             float lAtt = 1f / (1f + Mathf.Pow(Vector3.Distance(hit.point, l.LightPos), 2));
             // Shad att calc
